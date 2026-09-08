@@ -1,13 +1,12 @@
 // ========================================================================
 // SISTEMA DE GESTÃO — CAMILA RODRIGUES BEAUTY STUDIO
-// Page: Financeiro.tsx (Gestão Financeira, Entradas, Despesas & Contas)
+// Page: Financeiro.tsx (Gestão Financeira, Entradas, Despesas, Edição & Exclusão)
 // ========================================================================
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   DollarSign,
   TrendingUp,
-  CreditCard,
   Plus,
   Search,
   Download,
@@ -16,6 +15,7 @@ import {
   Trash2,
   ArrowDownRight,
   ArrowUpRight,
+  CheckCircle2,
 } from 'lucide-react';
 import { storage } from '../lib/storageAdapter';
 import {
@@ -69,7 +69,8 @@ export const Financeiro: React.FC = () => {
 
   // Delete State
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<{ id: string; type: 'entry' | 'expense' } | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; type: 'entry' | 'expense'; description: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form State - Entrada
   const [entryForm, setEntryForm] = useState<FinancialEntryDTO>({
@@ -213,7 +214,7 @@ export const Financeiro: React.FC = () => {
     try {
       if (editingEntry) {
         await financeService.updateEntry(editingEntry.id, entryForm);
-        toast.success('Entrada financeira atualizada!');
+        toast.success('Entrada financeira atualizada com sucesso!');
       } else {
         await financeService.createEntry(entryForm);
         toast.success('Entrada financeira registrada com sucesso!');
@@ -301,19 +302,22 @@ export const Financeiro: React.FC = () => {
 
   const handleDeleteItem = async () => {
     if (!itemToDelete) return;
+    setIsDeleting(true);
     try {
       if (itemToDelete.type === 'entry') {
         await financeService.deleteEntry(itemToDelete.id);
-        toast.success('Entrada removida do histórico.');
+        toast.success('Entrada removida do histórico financeiro.');
       } else {
         await financeService.deleteExpense(itemToDelete.id);
-        toast.success('Despesa removida do histórico.');
+        toast.success('Despesa removida do histórico financeiro.');
       }
       setIsDeleteDialogOpen(false);
       setItemToDelete(null);
       loadData();
     } catch (err: unknown) {
       toast.error((err as Error).message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -398,7 +402,7 @@ export const Financeiro: React.FC = () => {
             <span>Lucro Líquido Realizado</span>
             <TrendingUp className="w-4 h-4 text-gold-600" />
           </div>
-          <div className="text-2xl font-serif font-bold text-gold-600 dark:text-gold-400 mt-1">
+          <div className={`text-2xl font-serif font-bold mt-1 ${netProfit >= 0 ? 'text-gold-700 dark:text-gold-400' : 'text-rose-600'}`}>
             {formatBRL(netProfit)}
           </div>
           <div className="text-[11px] text-studio-muted mt-0.5">Receitas - Despesas Pagas</div>
@@ -407,17 +411,17 @@ export const Financeiro: React.FC = () => {
         <div className="p-4 rounded-2xl bg-white dark:bg-studio-darkCard border border-champagne-300 dark:border-studio-darkBorder shadow-sm">
           <div className="flex items-center justify-between text-xs font-bold uppercase text-studio-muted">
             <span>Contas a Receber</span>
-            <CreditCard className="w-4 h-4 text-amber-600" />
+            <span className="text-amber-500 font-bold">⏳</span>
           </div>
-          <div className="text-2xl font-serif font-bold text-amber-600 dark:text-amber-400 mt-1">
+          <div className="text-2xl font-serif font-bold text-amber-600 mt-1">
             {formatBRL(totalPendingReceivables)}
           </div>
-          <div className="text-[11px] text-amber-600 font-semibold mt-0.5">{pendingReceivablesList.length} valores pendentes</div>
+          <div className="text-[11px] text-studio-muted mt-0.5">Valores pendentes</div>
         </div>
       </div>
 
-      {/* Tabs Navigation */}
-      <div className="flex border-b border-champagne-300 dark:border-studio-darkBorder gap-4 text-xs font-semibold">
+      {/* Tabs */}
+      <div className="flex border-b border-champagne-300 dark:border-studio-darkBorder gap-6 text-xs font-semibold">
         {[
           { id: 'overview', label: 'Visão Geral & Fluxo' },
           { id: 'entries', label: `Entradas (${entries.length})` },
@@ -454,17 +458,44 @@ export const Financeiro: React.FC = () => {
             </div>
             <div className="space-y-2">
               {entries.slice(0, 5).map(e => (
-                <div key={e.id} className="p-3 rounded-xl bg-champagne-50/50 dark:bg-studio-darkBorder/30 flex items-center justify-between text-xs">
-                  <div>
-                    <div className="font-bold text-studio-text dark:text-champagne-100">{e.description}</div>
+                <div key={e.id} className="p-3 rounded-xl bg-champagne-50/50 dark:bg-studio-darkBorder/30 flex items-center justify-between text-xs hover:border-gold-300 transition-all border border-transparent">
+                  <div className="pr-2 truncate">
+                    <div className="font-bold text-studio-text dark:text-champagne-100 truncate">{e.description}</div>
                     <div className="text-[11px] text-studio-muted">{formatDate(e.date)} • {e.payment_method?.name || 'Pix'}</div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-bold text-emerald-600 font-serif">{formatBRL(e.amount)}</div>
-                    <FinancialStatusBadge status={e.status} />
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <div className="font-bold text-emerald-600 font-serif">{formatBRL(e.amount)}</div>
+                      <FinancialStatusBadge status={e.status} />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEditEntry(e)}
+                        className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 dark:border-studio-darkBorder dark:hover:bg-studio-darkCard text-studio-muted hover:text-gold-600 transition-colors"
+                        title="Editar Entrada"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setItemToDelete({ id: e.id, type: 'entry', description: e.description });
+                          setIsDeleteDialogOpen(true);
+                        }}
+                        className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 dark:border-studio-darkBorder dark:hover:bg-rose-950/40 text-studio-muted hover:text-rose-600 transition-colors"
+                        title="Excluir Entrada"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
+
+              {entries.length === 0 && (
+                <div className="p-6 text-center text-xs text-studio-muted">
+                  Nenhuma entrada registrada. Clique em "Nova Entrada" para cadastrar.
+                </div>
+              )}
             </div>
           </div>
 
@@ -481,17 +512,44 @@ export const Financeiro: React.FC = () => {
             </div>
             <div className="space-y-2">
               {expenses.slice(0, 5).map(exp => (
-                <div key={exp.id} className="p-3 rounded-xl bg-champagne-50/50 dark:bg-studio-darkBorder/30 flex items-center justify-between text-xs">
-                  <div>
-                    <div className="font-bold text-studio-text dark:text-champagne-100">{exp.description}</div>
+                <div key={exp.id} className="p-3 rounded-xl bg-champagne-50/50 dark:bg-studio-darkBorder/30 flex items-center justify-between text-xs hover:border-gold-300 transition-all border border-transparent">
+                  <div className="pr-2 truncate">
+                    <div className="font-bold text-studio-text dark:text-champagne-100 truncate">{exp.description}</div>
                     <div className="text-[11px] text-studio-muted">{formatDate(exp.date)} • {exp.cost_type === 'fixed' ? 'Custo Fixo' : 'Custo Variável'}</div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-bold text-rose-600 font-serif">{formatBRL(exp.amount)}</div>
-                    <FinancialStatusBadge status={exp.status} />
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <div className="font-bold text-rose-600 font-serif">{formatBRL(exp.amount)}</div>
+                      <FinancialStatusBadge status={exp.status} />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEditExpense(exp)}
+                        className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 dark:border-studio-darkBorder dark:hover:bg-studio-darkCard text-studio-muted hover:text-gold-600 transition-colors"
+                        title="Editar Despesa"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setItemToDelete({ id: exp.id, type: 'expense', description: exp.description });
+                          setIsDeleteDialogOpen(true);
+                        }}
+                        className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 dark:border-studio-darkBorder dark:hover:bg-rose-950/40 text-studio-muted hover:text-rose-600 transition-colors"
+                        title="Excluir Despesa"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
+
+              {expenses.length === 0 && (
+                <div className="p-6 text-center text-xs text-studio-muted">
+                  Nenhuma despesa registrada. Clique em "Nova Despesa" para cadastrar.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -525,6 +583,7 @@ export const Financeiro: React.FC = () => {
                   <div className="font-bold text-sm text-studio-text dark:text-champagne-100">{e.description}</div>
                   <div className="text-studio-muted">
                     Data: {formatDate(e.date)} • Categoria: {e.category} • Forma: {e.payment_method?.name || 'Pix'}
+                    {e.client?.full_name && ` • Cliente: ${e.client.full_name}`}
                   </div>
                 </div>
 
@@ -535,22 +594,30 @@ export const Financeiro: React.FC = () => {
                   <FinancialStatusBadge status={e.status} />
                   <button
                     onClick={() => handleOpenEditEntry(e)}
-                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 text-studio-muted hover:text-gold-600"
+                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 dark:border-studio-darkBorder dark:hover:bg-studio-darkCard text-studio-muted hover:text-gold-600 transition-colors"
+                    title="Editar Entrada"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => {
-                      setItemToDelete({ id: e.id, type: 'entry' });
+                      setItemToDelete({ id: e.id, type: 'entry', description: e.description });
                       setIsDeleteDialogOpen(true);
                     }}
-                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 text-studio-muted hover:text-rose-600"
+                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 dark:border-studio-darkBorder dark:hover:bg-rose-950/40 text-studio-muted hover:text-rose-600 transition-colors"
+                    title="Excluir Entrada"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             ))}
+
+            {filteredEntries.length === 0 && (
+              <div className="p-8 text-center text-xs text-studio-muted">
+                Nenhuma entrada encontrada com os filtros aplicados.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -600,22 +667,30 @@ export const Financeiro: React.FC = () => {
                   <FinancialStatusBadge status={exp.status} />
                   <button
                     onClick={() => handleOpenEditExpense(exp)}
-                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 text-studio-muted hover:text-gold-600"
+                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 dark:border-studio-darkBorder dark:hover:bg-studio-darkCard text-studio-muted hover:text-gold-600 transition-colors"
+                    title="Editar Despesa"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => {
-                      setItemToDelete({ id: exp.id, type: 'expense' });
+                      setItemToDelete({ id: exp.id, type: 'expense', description: exp.description });
                       setIsDeleteDialogOpen(true);
                     }}
-                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 text-studio-muted hover:text-rose-600"
+                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 dark:border-studio-darkBorder dark:hover:bg-rose-950/40 text-studio-muted hover:text-rose-600 transition-colors"
+                    title="Excluir Despesa"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             ))}
+
+            {filteredExpenses.length === 0 && (
+              <div className="p-8 text-center text-xs text-studio-muted">
+                Nenhuma despesa encontrada com os filtros aplicados.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -641,13 +716,30 @@ export const Financeiro: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="font-serif font-bold text-base text-amber-600">
+                <div className="flex items-center gap-2">
+                  <span className="font-serif font-bold text-base text-amber-600 mr-2">
                     {formatBRL(item.amount)}
                   </span>
-                  <Button variant="primary" size="sm" onClick={() => handleMarkAsReceived(item)}>
+                  <Button variant="primary" size="sm" onClick={() => handleMarkAsReceived(item)} leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}>
                     Confirmar Recebimento
                   </Button>
+                  <button
+                    onClick={() => handleOpenEditEntry(item)}
+                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-champagne-100 dark:border-studio-darkBorder dark:hover:bg-studio-darkCard text-studio-muted hover:text-gold-600 transition-colors"
+                    title="Editar Entrada Pendente"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setItemToDelete({ id: item.id, type: 'entry', description: item.description });
+                      setIsDeleteDialogOpen(true);
+                    }}
+                    className="p-1.5 rounded-lg border border-champagne-300 hover:bg-rose-50 dark:border-studio-darkBorder dark:hover:bg-rose-950/40 text-studio-muted hover:text-rose-600 transition-colors"
+                    title="Excluir Entrada Pendente"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -723,13 +815,40 @@ export const Financeiro: React.FC = () => {
             onChange={e => setEntryForm({ ...entryForm, status: e.target.value as FinancialStatus })}
           />
 
-          <div className="flex justify-end gap-3 pt-3 border-t border-champagne-200 dark:border-studio-darkBorder">
-            <Button variant="outline" type="button" onClick={() => setIsEntryModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button variant="primary" type="submit" isLoading={isSubmitting}>
-              {editingEntry ? 'Salvar Alterações' : 'Registrar Entrada'}
-            </Button>
+          <Input
+            label="Observações"
+            placeholder="Ex: Pagamento parcelado, cliente pagou 50% adiantado..."
+            value={entryForm.notes || ''}
+            onChange={e => setEntryForm({ ...entryForm, notes: e.target.value })}
+          />
+
+          <div className="flex items-center justify-between pt-3 border-t border-champagne-200 dark:border-studio-darkBorder">
+            <div>
+              {editingEntry && (
+                <Button
+                  variant="danger"
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    setItemToDelete({ id: editingEntry.id, type: 'entry', description: editingEntry.description });
+                    setIsEntryModalOpen(false);
+                    setIsDeleteDialogOpen(true);
+                  }}
+                  leftIcon={<Trash2 className="w-4 h-4" />}
+                >
+                  Excluir Entrada
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" type="button" onClick={() => setIsEntryModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="primary" type="submit" isLoading={isSubmitting}>
+                {editingEntry ? 'Salvar Alterações' : 'Registrar Entrada'}
+              </Button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -801,13 +920,40 @@ export const Financeiro: React.FC = () => {
             />
           </div>
 
-          <div className="flex justify-end gap-3 pt-3 border-t border-champagne-200 dark:border-studio-darkBorder">
-            <Button variant="outline" type="button" onClick={() => setIsExpenseModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button variant="primary" type="submit" isLoading={isSubmitting}>
-              {editingExpense ? 'Salvar Alterações' : 'Salvar Despesa'}
-            </Button>
+          <Input
+            label="Observações"
+            placeholder="Ex: Comprado com desconto à vista via Pix..."
+            value={expenseForm.notes || ''}
+            onChange={e => setExpenseForm({ ...expenseForm, notes: e.target.value })}
+          />
+
+          <div className="flex items-center justify-between pt-3 border-t border-champagne-200 dark:border-studio-darkBorder">
+            <div>
+              {editingExpense && (
+                <Button
+                  variant="danger"
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    setItemToDelete({ id: editingExpense.id, type: 'expense', description: editingExpense.description });
+                    setIsExpenseModalOpen(false);
+                    setIsDeleteDialogOpen(true);
+                  }}
+                  leftIcon={<Trash2 className="w-4 h-4" />}
+                >
+                  Excluir Despesa
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" type="button" onClick={() => setIsExpenseModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="primary" type="submit" isLoading={isSubmitting}>
+                {editingExpense ? 'Salvar Alterações' : 'Salvar Despesa'}
+              </Button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -817,9 +963,12 @@ export const Financeiro: React.FC = () => {
         isOpen={isDeleteDialogOpen}
         onClose={() => setIsDeleteDialogOpen(false)}
         onConfirm={handleDeleteItem}
-        title="Excluir Lançamento Financeiro"
-        description="Tem certeza que deseja excluir este lançamento? Esta ação recalculará o faturamento e fluxo de caixa."
+        isLoading={isDeleting}
+        title={`Excluir ${itemToDelete?.type === 'entry' ? 'Entrada Financeira' : 'Despesa'}`}
+        description={`Tem certeza que deseja excluir permanentemente "${itemToDelete?.description || 'este lançamento'}"? Esta ação recalculará o faturamento e o fluxo de caixa.`}
         confirmText="Sim, Excluir"
+        cancelText="Cancelar"
+        variant="danger"
       />
 
     </div>
