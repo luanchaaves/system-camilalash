@@ -48,6 +48,9 @@ export const Configuracoes: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
 
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [isSavingGoogleEmail, setIsSavingGoogleEmail] = useState(false);
+
   // New item inputs
   const [newPmName, setNewPmName] = useState('');
   const [newEcName, setNewEcName] = useState('');
@@ -61,6 +64,9 @@ export const Configuracoes: React.FC = () => {
       const ec = await financeService.getExpenseCategories();
       setStudioSettings(s);
       setGoogleStatus(g);
+      if (g?.google_account_email) {
+        setGoogleEmail(g.google_account_email);
+      }
       setAuditLogs(a);
       setPaymentMethods(pm);
       setExpenseCategories(ec);
@@ -90,14 +96,34 @@ export const Configuracoes: React.FC = () => {
     }
   };
 
+  const handleSaveGoogleEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleEmail.trim()) {
+      toast.error('Informe um e-mail válido para sincronização com o Google.');
+      return;
+    }
+
+    setIsSavingGoogleEmail(true);
+    try {
+      await googleCalendarService.connect(googleEmail.trim());
+      toast.success('E-mail do Google Calendar salvo e conectado com sucesso!');
+      loadData();
+    } catch (err: unknown) {
+      toast.error((err as Error).message);
+    } finally {
+      setIsSavingGoogleEmail(false);
+    }
+  };
+
   const handleToggleGoogleConnect = async () => {
     try {
       if (googleStatus?.is_connected) {
         await googleCalendarService.disconnect();
         toast.info('Google Calendar desconectado.');
       } else {
-        await googleCalendarService.connect('contato@camilarodriguesbeauty.com.br');
-        toast.success('Google Calendar conectado e sincronizado com sucesso!');
+        const targetEmail = googleEmail.trim() || 'contato@camilarodriguesbeauty.com.br';
+        await googleCalendarService.connect(targetEmail);
+        toast.success(`Google Calendar conectado à conta ${targetEmail}!`);
       }
       loadData();
     } catch (err: unknown) {
@@ -338,46 +364,75 @@ export const Configuracoes: React.FC = () => {
               Sincronização com Google Calendar
             </h3>
             <p className="text-xs text-studio-muted dark:text-champagne-400">
-              Mantenha seus agendamentos sincronizados automaticamente com o calendário do seu smartphone
+              Mantenha seus agendamentos sincronizados automaticamente com o calendário do seu smartphone (Google Agenda / Gmail)
             </p>
           </div>
 
-          <div className="p-5 rounded-2xl bg-champagne-50/60 dark:bg-studio-darkBorder/30 border border-champagne-200 dark:border-studio-darkBorder flex items-start justify-between gap-4">
-            <div className="space-y-1 text-xs">
-              <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${googleStatus?.is_connected ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
-                <span className="font-bold text-studio-text dark:text-champagne-100">
-                  {googleStatus?.is_connected ? 'Google Calendar Conectado' : 'Não Conectado'}
-                </span>
-              </div>
-              {googleStatus?.is_connected && (
-                <div className="text-studio-muted text-[11px] space-y-0.5">
-                  <div>Conta: {googleStatus.google_account_email}</div>
-                  <div>Última sincronização: {formatDate(googleStatus.last_sync_at, "dd/MM/yyyy 'às' HH:mm")}</div>
+          <div className="p-5 rounded-2xl bg-champagne-50/60 dark:bg-studio-darkBorder/30 border border-champagne-200 dark:border-studio-darkBorder space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${googleStatus?.is_connected ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'}`} />
+                  <span className="font-bold text-studio-text dark:text-champagne-100">
+                    Status: {googleStatus?.is_connected ? 'Google Calendar Conectado' : 'Não Conectado'}
+                  </span>
                 </div>
-              )}
+                {googleStatus?.is_connected && googleStatus.last_sync_at && (
+                  <div className="text-studio-muted text-[11px]">
+                    Última sincronização: {formatDate(googleStatus.last_sync_at, "dd/MM/yyyy 'às' HH:mm")}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {googleStatus?.is_connected && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSyncGoogle}
+                    isLoading={isSyncingGoogle}
+                    leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                  >
+                    Sincronizar Agora
+                  </Button>
+                )}
+                <Button
+                  variant={googleStatus?.is_connected ? 'danger' : 'primary'}
+                  size="sm"
+                  onClick={handleToggleGoogleConnect}
+                >
+                  {googleStatus?.is_connected ? 'Desconectar' : 'Conectar'}
+                </Button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {googleStatus?.is_connected && (
+            {/* Formulário de alteração de e-mail */}
+            <form onSubmit={handleSaveGoogleEmail} className="pt-4 border-t border-champagne-200 dark:border-studio-darkBorder space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                <div className="flex-1">
+                  <Input
+                    label="Endereço de E-mail do Google (Gmail)"
+                    type="email"
+                    required
+                    placeholder="exemplo@gmail.com"
+                    value={googleEmail}
+                    onChange={e => setGoogleEmail(e.target.value)}
+                  />
+                </div>
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSyncGoogle}
-                  isLoading={isSyncingGoogle}
-                  leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  isLoading={isSavingGoogleEmail}
+                  leftIcon={<Save className="w-4 h-4" />}
                 >
-                  Sincronizar
+                  Salvar E-mail
                 </Button>
-              )}
-              <Button
-                variant={googleStatus?.is_connected ? 'danger' : 'primary'}
-                size="sm"
-                onClick={handleToggleGoogleConnect}
-              >
-                {googleStatus?.is_connected ? 'Desconectar' : 'Conectar Conta Google'}
-              </Button>
-            </div>
+              </div>
+              <p className="text-[11px] text-studio-muted">
+                Dica: Digite o e-mail da conta Google que você usa no seu celular para receber e sincronizar os horários.
+              </p>
+            </form>
           </div>
         </div>
       )}
