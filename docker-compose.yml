@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   camilalash-app:
     build:
@@ -11,6 +9,6 @@ services:
     container_name: camilalash_management_system
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "3000:80"
     environment:
       - NODE_ENV=production
