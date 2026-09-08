@@ -9,6 +9,6 @@ services:
     container_name: camilalash_management_system
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${PORT:-8181}:80"
     environment:
       - NODE_ENV=production
