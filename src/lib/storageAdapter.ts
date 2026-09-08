@@ -19,7 +19,10 @@ import {
   initialGoogleCalendarConnection,
 } from './mockSeedData';
 
+const CURRENT_DB_VERSION = 'camilalash_db_clean_v1';
+
 const STORAGE_KEYS = {
+  VERSION: 'camilalash_db_version',
   PROFILE: 'camilalash_profile',
   SETTINGS: 'camilalash_settings',
   CATEGORIES: 'camilalash_service_categories',
@@ -45,6 +48,20 @@ class StorageAdapter {
 
   public init() {
     if (this.isInitialized || typeof window === 'undefined') return;
+
+    const storedVersion = localStorage.getItem(STORAGE_KEYS.VERSION);
+
+    // Migração para banco limpo de produção
+    if (storedVersion !== CURRENT_DB_VERSION) {
+      localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(initialClients));
+      localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(initialAppointments));
+      localStorage.setItem(STORAGE_KEYS.ENTRIES, JSON.stringify(initialFinancialEntries));
+      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(initialFinancialExpenses));
+      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(initialNotifications));
+      localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(initialAuditLogs));
+      localStorage.setItem(STORAGE_KEYS.GOOGLE_CALENDAR, JSON.stringify(initialGoogleCalendarConnection));
+      localStorage.setItem(STORAGE_KEYS.VERSION, CURRENT_DB_VERSION);
+    }
 
     if (!localStorage.getItem(STORAGE_KEYS.PROFILE)) {
       this.setItem(STORAGE_KEYS.PROFILE, initialProfile);

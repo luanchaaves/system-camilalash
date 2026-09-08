@@ -1,6 +1,6 @@
 // ========================================================================
 // SISTEMA DE GESTÃO — CAMILA RODRIGUES BEAUTY STUDIO
-// Page: Agenda.tsx (Gestão Completa de Horários e Atendimentos)
+// Page: Agenda.tsx (Gestão Completa de Horários, Atendimentos & Exclusão)
 // ========================================================================
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -26,7 +26,9 @@ import {
   ChevronRight,
   AlertCircle,
   Send,
-  MoreVertical,
+  Edit2,
+  Trash2,
+  CheckCircle2,
 } from 'lucide-react';
 import { storage } from '../lib/storageAdapter';
 import { Appointment, Client, Service, PaymentMethod, AppointmentStatus, AppointmentType } from '../types';
@@ -40,6 +42,7 @@ import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
 import { CurrencyInput } from '../components/common/CurrencyInput';
 import { Modal } from '../components/common/Modal';
+import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { AppointmentStatusBadge } from '../components/common/Badge';
 import { toast } from 'sonner';
 
@@ -75,16 +78,26 @@ export const Agenda: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
 
-  // Cancellation Modal
+  // Cancellation Modal State
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [cancellingAppId, setCancellingAppId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
-  const loadData = () => {
-    setAppointments(storage.getAppointments());
-    setClients(storage.getClients());
-    setServices(storage.getServices());
-    setPaymentMethods(storage.getPaymentMethods());
+  // Delete Dialog State
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deletingAppointment, setDeletingAppointment] = useState<Appointment | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const loadData = async () => {
+    try {
+      const appData = await appointmentsService.getAll();
+      setAppointments(appData);
+      setClients(storage.getClients());
+      setServices(storage.getServices().filter(s => s.is_active));
+      setPaymentMethods(storage.getPaymentMethods().filter(p => p.is_active));
+    } catch (err: unknown) {
+      toast.error((err as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -93,81 +106,31 @@ export const Agenda: React.FC = () => {
     return () => window.removeEventListener('camilalash_storage_update', loadData);
   }, []);
 
-  // Popula relacionamentos
   const populatedAppointments = useMemo(() => {
-    return appointments.map(a => ({
-      ...a,
-      client: clients.find(c => c.id === a.client_id),
-      service: services.find(s => s.id === a.service_id),
-      payment_method: paymentMethods.find(p => p.id === a.payment_method_id),
-    }));
-  }, [appointments, clients, services, paymentMethods]);
+    return appointments.map(app => {
+      const client = clients.find(c => c.id === app.client_id);
+      const service = services.find(s => s.id === app.service_id);
+      return { ...app, client, service };
+    });
+  }, [appointments, clients, services]);
 
-  // Checagem de Conflito em tempo real no formulário
-  useEffect(() => {
-    if (!appointmentDate || !appointmentTime || !durationMinutes) return;
-
-    try {
-      const [h, m] = appointmentTime.split(':').map(Number);
-      const start = setMinutes(setHours(parseISO(appointmentDate), h), m);
-      const end = addMinutes(start, durationMinutes);
-
-      const check = checkAppointmentConflict(
-        start.toISOString(),
-        end.toISOString(),
-        appointments,
-        editingAppointment?.id
-      );
-
-      if (check.hasConflict) {
-        setConflictWarning(check.message || 'Conflito detectado');
-      } else {
-        setConflictWarning(null);
-      }
-    } catch {
-      setConflictWarning(null);
-    }
-  }, [appointmentDate, appointmentTime, durationMinutes, appointments, editingAppointment]);
-
-  // Quando seleciona procedimento ou altera tipo (Aplicação vs Manutenção)
-  const handleServiceChange = (serviceId: string, type: AppointmentType = appointmentType) => {
-    setSelectedServiceId(serviceId);
-    const srv = services.find(s => s.id === serviceId);
-    if (srv) {
-      if (type === 'maintenance') {
-        setTotalAmount(srv.maintenance_price);
-        setDurationMinutes(srv.maintenance_duration_minutes);
-      } else {
-        setTotalAmount(srv.price);
-        setDurationMinutes(srv.duration_minutes);
-      }
-    }
-  };
-
-  const handleTypeChange = (type: AppointmentType) => {
-    setAppointmentType(type);
-    if (selectedServiceId) {
-      handleServiceChange(selectedServiceId, type);
-    }
-  };
-
-  const handleOpenCreateModal = (presetDate?: Date, presetTime?: string) => {
+  const handleOpenCreateModal = (targetDate?: Date) => {
     setEditingAppointment(null);
     setSelectedClientId(clients[0]?.id || '');
-    setIsCreatingClientInline(false);
+    setIsCreatingClientInline(clients.length === 0);
     setNewClientName('');
     setNewClientPhone('');
-    
-    const defaultSrv = services[0];
-    if (defaultSrv) {
-      setSelectedServiceId(defaultSrv.id);
-      setAppointmentType('application');
-      setTotalAmount(defaultSrv.price);
-      setDurationMinutes(defaultSrv.duration_minutes);
+
+    const defaultService = services[0];
+    if (defaultService) {
+      setSelectedServiceId(defaultService.id);
+      setTotalAmount(defaultService.price);
+      setDurationMinutes(defaultService.duration_minutes);
     }
 
-    setAppointmentDate(format(presetDate || currentDate, 'yyyy-MM-dd'));
-    setAppointmentTime(presetTime || '09:00');
+    setAppointmentType('application');
+    setAppointmentDate(format(targetDate || currentDate, 'yyyy-MM-dd'));
+    setAppointmentTime('09:00');
     setDepositAmount(0);
     setPaymentMethodId(paymentMethods[0]?.id || '');
     setNotes('');
@@ -192,6 +155,83 @@ export const Agenda: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  const handleOpenDeleteDialog = (app: Appointment, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDeletingAppointment(app);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingAppointment) return;
+    setIsDeleting(true);
+    try {
+      await appointmentsService.delete(deletingAppointment.id);
+      toast.success('Agendamento excluído da agenda com sucesso!');
+      setIsDeleteDialogOpen(false);
+      setIsModalOpen(false);
+      setDeletingAppointment(null);
+      loadData();
+    } catch (err: unknown) {
+      toast.error((err as Error).message || 'Erro ao excluir agendamento.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleServiceChange = (serviceId: string) => {
+    setSelectedServiceId(serviceId);
+    const service = services.find(s => s.id === serviceId);
+    if (service) {
+      if (appointmentType === 'maintenance') {
+        setTotalAmount(service.maintenance_price);
+        setDurationMinutes(service.maintenance_duration_minutes);
+      } else {
+        setTotalAmount(service.price);
+        setDurationMinutes(service.duration_minutes);
+      }
+    }
+  };
+
+  const handleTypeChange = (type: AppointmentType) => {
+    setAppointmentType(type);
+    const service = services.find(s => s.id === selectedServiceId);
+    if (service) {
+      if (type === 'maintenance') {
+        setTotalAmount(service.maintenance_price);
+        setDurationMinutes(service.maintenance_duration_minutes);
+      } else {
+        setTotalAmount(service.price);
+        setDurationMinutes(service.duration_minutes);
+      }
+    }
+  };
+
+  // Verificação de conflito em tempo real ao editar campos de horário
+  useEffect(() => {
+    if (!isModalOpen || !appointmentDate || !appointmentTime || !durationMinutes) return;
+
+    try {
+      const [hours, minutes] = appointmentTime.split(':').map(Number);
+      const start = setMinutes(setHours(new Date(`${appointmentDate}T00:00:00`), hours), minutes);
+      const end = addMinutes(start, durationMinutes);
+
+      const conflict = checkAppointmentConflict(
+        start.toISOString(),
+        end.toISOString(),
+        appointments,
+        editingAppointment?.id
+      );
+
+      if (conflict.hasConflict) {
+        setConflictWarning(conflict.message || 'Horário em conflito com outro atendimento.');
+      } else {
+        setConflictWarning(null);
+      }
+    } catch {
+      // ignore parsing errors
+    }
+  }, [appointmentDate, appointmentTime, durationMinutes, appointments, editingAppointment, isModalOpen]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -199,29 +239,30 @@ export const Agenda: React.FC = () => {
     try {
       let finalClientId = selectedClientId;
 
-      // Criação rápida de cliente inline
+      // Criação inline de cliente
       if (isCreatingClientInline) {
         if (!newClientName.trim() || !newClientPhone.trim()) {
           toast.error('Informe o nome e WhatsApp da nova cliente.');
           setIsSubmitting(false);
           return;
         }
-        const created = await clientsService.create({
-          full_name: newClientName,
-          whatsapp: newClientPhone,
+
+        const createdClient = await clientsService.create({
+          full_name: newClientName.trim(),
+          whatsapp: newClientPhone.replace(/\D/g, ''),
+          status: 'active',
         });
-        finalClientId = created.id;
-        toast.success(`Cliente ${created.full_name} cadastrada com sucesso!`);
+        finalClientId = createdClient.id;
       }
 
       if (!finalClientId) {
-        toast.error('Selecione uma cliente.');
+        toast.error('Selecione ou cadastre uma cliente.');
         setIsSubmitting(false);
         return;
       }
 
-      const [h, m] = appointmentTime.split(':').map(Number);
-      const start = setMinutes(setHours(parseISO(appointmentDate), h), m);
+      const [hours, minutes] = appointmentTime.split(':').map(Number);
+      const start = setMinutes(setHours(new Date(`${appointmentDate}T00:00:00`), hours), minutes);
       const end = addMinutes(start, durationMinutes);
 
       const dto: AppointmentDTO = {
@@ -242,7 +283,7 @@ export const Agenda: React.FC = () => {
         toast.success('Agendamento atualizado com sucesso!');
       } else {
         await appointmentsService.create(dto);
-        toast.success('Horário agendado com sucesso!');
+        toast.success('Novo horário agendado com sucesso!');
       }
 
       setIsModalOpen(false);
@@ -264,7 +305,7 @@ export const Agenda: React.FC = () => {
 
     try {
       await appointmentsService.updateStatus(appId, status);
-      toast.success(`Status alterado para "${status}".`);
+      toast.success(status === 'completed' ? 'Atendimento concluído! Lançamento financeiro registrado.' : `Status alterado para "${status}".`);
       loadData();
     } catch (err: unknown) {
       toast.error((err as Error).message);
@@ -301,6 +342,7 @@ export const Agenda: React.FC = () => {
             <button
               onClick={() => setCurrentDate(subDays(currentDate, viewMode === 'week' ? 7 : 1))}
               className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-studio-darkCard text-studio-text dark:text-champagne-100 transition-colors"
+              title="Período anterior"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -313,6 +355,7 @@ export const Agenda: React.FC = () => {
             <button
               onClick={() => setCurrentDate(addDays(currentDate, viewMode === 'week' ? 7 : 1))}
               className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-studio-darkCard text-studio-text dark:text-champagne-100 transition-colors"
+              title="Próximo período"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -393,7 +436,7 @@ export const Agenda: React.FC = () => {
                   {dayApps.map(app => (
                     <div
                       key={app.id}
-                      className={`p-2.5 rounded-xl border text-xs transition-all shadow-xs group ${
+                      className={`p-2.5 rounded-xl border text-xs transition-all shadow-xs group relative ${
                         app.status === 'completed'
                           ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-800/40 dark:bg-emerald-950/30'
                           : app.status === 'cancelled'
@@ -402,16 +445,16 @@ export const Agenda: React.FC = () => {
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-gold-700 dark:text-gold-400">
+                        <span className="font-bold text-gold-700 dark:text-gold-400 text-[11px]">
                           {formatTime(app.start_time)} - {formatTime(app.end_time)}
                         </span>
                         <div className="flex items-center gap-1">
                           {app.client?.whatsapp && (
                             <a
-                              href={getWhatsAppLink(app.client.whatsapp, `Olá ${app.client.full_name}, lembrete do seu atendimento no Camila Rodrigues Beauty Studio às ${formatTime(app.start_time)}.`)}
+                              href={getWhatsAppLink(app.client.whatsapp, `Olá ${app.client.full_name}, confirmando seu horário no Camila Rodrigues Beauty Studio às ${formatTime(app.start_time)}.`)}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-emerald-600 hover:text-emerald-700 p-0.5"
+                              className="text-emerald-600 hover:text-emerald-700 p-0.5 rounded hover:bg-emerald-50"
                               title="WhatsApp"
                             >
                               <Send className="w-3 h-3" />
@@ -419,10 +462,17 @@ export const Agenda: React.FC = () => {
                           )}
                           <button
                             onClick={() => handleOpenEditModal(app)}
-                            className="text-studio-muted hover:text-gold-600 p-0.5"
-                            title="Editar"
+                            className="text-studio-muted hover:text-gold-600 p-0.5 rounded hover:bg-champagne-100"
+                            title="Editar agendamento"
                           >
-                            <MoreVertical className="w-3 h-3" />
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={(e) => handleOpenDeleteDialog(app, e)}
+                            className="text-studio-muted hover:text-rose-600 p-0.5 rounded hover:bg-rose-50"
+                            title="Excluir da agenda"
+                          >
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
@@ -442,20 +492,22 @@ export const Agenda: React.FC = () => {
                         <AppointmentStatusBadge status={app.status} />
                       </div>
 
-                      {/* Quick Status Action */}
+                      {/* Quick Status Actions */}
                       {app.status !== 'completed' && app.status !== 'cancelled' && (
                         <div className="mt-2 flex gap-1 pt-1">
                           <button
                             onClick={() => handleStatusChange(app.id, 'completed')}
-                            className="w-full py-1 rounded bg-emerald-600 text-white text-[10px] font-bold hover:bg-emerald-700 transition-colors"
+                            className="w-full py-1 rounded bg-emerald-600 text-white text-[10px] font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1"
+                            title="Marcar como Concluído e faturar"
                           >
-                            Concluir
+                            <CheckCircle2 className="w-3 h-3" /> Concluir
                           </button>
                           <button
                             onClick={() => handleStatusChange(app.id, 'cancelled')}
                             className="px-2 py-1 rounded bg-rose-100 dark:bg-rose-950 text-rose-600 text-[10px] font-bold hover:bg-rose-200 transition-colors"
+                            title="Cancelar agendamento"
                           >
-                            X
+                            Cancelar
                           </button>
                         </div>
                       )}
@@ -501,7 +553,7 @@ export const Agenda: React.FC = () => {
                   </div>
                   <div>
                     <div className="text-base font-bold text-studio-text dark:text-champagne-100">
-                      {app.client?.full_name}
+                      {app.client?.full_name || 'Cliente'}
                     </div>
                     <div className="text-xs text-studio-muted dark:text-champagne-400">
                       {app.service?.name} ({app.appointment_type === 'maintenance' ? 'Manutenção' : 'Aplicação'}) • {app.duration_minutes} min • {formatBRL(app.total_amount)}
@@ -526,17 +578,26 @@ export const Agenda: React.FC = () => {
                       <Send className="w-4 h-4" />
                     </a>
                   )}
-                  <Button variant="outline" size="sm" onClick={() => handleOpenEditModal(app)}>
+                  <Button variant="outline" size="sm" onClick={() => handleOpenEditModal(app)} leftIcon={<Edit2 className="w-3.5 h-3.5" />}>
                     Editar
                   </Button>
+                  <Button variant="danger" size="sm" onClick={(e) => handleOpenDeleteDialog(app, e)} leftIcon={<Trash2 className="w-3.5 h-3.5" />}>
+                    Excluir
+                  </Button>
                   {app.status !== 'completed' && app.status !== 'cancelled' && (
-                    <Button variant="primary" size="sm" onClick={() => handleStatusChange(app.id, 'completed')}>
+                    <Button variant="primary" size="sm" onClick={() => handleStatusChange(app.id, 'completed')} leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}>
                       Concluir
                     </Button>
                   )}
                 </div>
               </div>
             ))}
+
+          {populatedAppointments.filter(a => isSameDay(parseISO(a.start_time), currentDate)).length === 0 && (
+            <div className="p-8 text-center text-xs text-studio-muted">
+              Nenhum agendamento marcado para esta data.
+            </div>
+          )}
         </div>
       )}
 
@@ -638,7 +699,10 @@ export const Agenda: React.FC = () => {
               </div>
             ) : (
               <Select
-                options={clients.map(c => ({ value: c.id, label: `${c.full_name} (${c.whatsapp})` }))}
+                options={clients.length > 0 
+                  ? clients.map(c => ({ value: c.id, label: `${c.full_name} (${c.whatsapp})` }))
+                  : [{ value: '', label: 'Nenhuma cliente cadastrada — use "+ Nova cliente rápida"' }]
+                }
                 value={selectedClientId}
                 onChange={e => setSelectedClientId(e.target.value)}
               />
@@ -721,13 +785,29 @@ export const Agenda: React.FC = () => {
             onChange={e => setNotes(e.target.value)}
           />
 
-          <div className="flex justify-end gap-3 pt-3 border-t border-champagne-200 dark:border-studio-darkBorder">
-            <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button variant="primary" type="submit" isLoading={isSubmitting}>
-              {editingAppointment ? 'Salvar Alterações' : 'Confirmar Agendamento'}
-            </Button>
+          <div className="flex items-center justify-between pt-3 border-t border-champagne-200 dark:border-studio-darkBorder">
+            <div>
+              {editingAppointment && (
+                <Button
+                  variant="danger"
+                  type="button"
+                  size="sm"
+                  onClick={() => handleOpenDeleteDialog(editingAppointment)}
+                  leftIcon={<Trash2 className="w-4 h-4" />}
+                >
+                  Excluir da Agenda
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="primary" type="submit" isLoading={isSubmitting}>
+                {editingAppointment ? 'Salvar Alterações' : 'Confirmar Agendamento'}
+              </Button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -757,6 +837,19 @@ export const Agenda: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DEFINITIVA */}
+      <ConfirmDialog
+        isOpen={isDeleteDialogOpen}
+        onClose={() => setIsDeleteDialogOpen(false)}
+        onConfirm={handleConfirmDelete}
+        isLoading={isDeleting}
+        title="Excluir Agendamento da Agenda"
+        description={`Tem certeza que deseja excluir permanentemente o agendamento de "${deletingAppointment?.client?.full_name || 'Cliente'}"? Essa ação removerá o horário da sua agenda.`}
+        confirmText="Excluir Permanentemente"
+        cancelText="Cancelar"
+        variant="danger"
+      />
 
     </div>
   );

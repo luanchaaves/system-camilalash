@@ -6,6 +6,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  format,
+  subMonths,
+} from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import {
   DollarSign,
   TrendingUp,
   Calendar,
@@ -120,17 +125,34 @@ export const Dashboard: React.FC = () => {
   const completedCount = appointments.filter(a => a.status === 'completed').length;
   const averageTicket = calculateAverageTicket(currentMonthReceived, completedCount);
 
-  // Gráfico Histórico 6 Meses
+  // Gráfico Histórico 6 Meses (Calculado Dinamicamente)
   const monthlyChartData = useMemo(() => {
-    return [
-      { month: 'Abr', faturamento: 2800, despesas: 1450, lucro: 1350 },
-      { month: 'Mai', faturamento: 3400, despesas: 1520, lucro: 1880 },
-      { month: 'Jun', faturamento: 3950, despesas: 1600, lucro: 2350 },
-      { month: 'Jul', faturamento: 4300, despesas: 1780, lucro: 2520 },
-      { month: 'Ago', faturamento: 4900, despesas: 1850, lucro: 3050 },
-      { month: 'Set (Atual)', faturamento: currentMonthReceived, despesas: currentMonthExpenses, lucro: netProfit },
-    ];
-  }, [currentMonthReceived, currentMonthExpenses, netProfit]);
+    const months = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = subMonths(now, i);
+      const mKey = format(d, 'yyyy-MM');
+      const mLabel = format(d, 'MMM', { locale: ptBR });
+
+      const fat = entries
+        .filter(e => e.status === 'received' && e.date.startsWith(mKey))
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const desp = expenses
+        .filter(e => e.status === 'paid' && e.date.startsWith(mKey))
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const luc = calculateNetProfit(fat, desp);
+
+      months.push({
+        month: i === 0 ? `${mLabel} (Atual)` : mLabel,
+        faturamento: fat,
+        despesas: desp,
+        lucro: luc,
+      });
+    }
+    return months;
+  }, [entries, expenses]);
 
   // Ranking de Serviços
   const serviceRankingData = useMemo(() => {
