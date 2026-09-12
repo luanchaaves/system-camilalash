@@ -1,20 +1,20 @@
 # ========================================================================
 # CAMILA RODRIGUES BEAUTY STUDIO — DOCKERFILE MULTI-STAGE
+# Node.js 20 Backend API + SPA Frontend + Banco Persistente no Disco
 # ========================================================================
 
-# --- ESTÁGIO 1: BUILD ---
+# --- ESTÁGIO 1: BUILD DO FRONTEND ---
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copia dependências e instala
+# Copia manifests e instala dependências de compilação
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Copia código-fonte e compila
+# Copia código-fonte e compila os assets estáticos do Vite
 COPY . .
 
-# Argumentos de ambiente opcionais durante o build
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 
@@ -23,17 +23,29 @@ ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 
 RUN npm run build
 
-# --- ESTÁGIO 2: PRODUÇÃO (NGINX ALPINE LEVE) ---
-FROM nginx:alpine-slim
+# --- ESTÁGIO 2: SERVIDOR DE PRODUÇÃO PERSISTENTE ---
+FROM node:20-alpine AS runner
 
-# Copia configuração customizada do Nginx para SPA
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Copia artefatos compilados do estágio anterior
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Instala apenas dependências de produção necessárias
+COPY package.json package-lock.json ./
+RUN npm ci --only=production
 
-# Expõe a porta 80
+# Copia o backend do servidor e os arquivos compilados do frontend
+COPY server/ ./server/
+COPY --from=builder /app/dist ./dist
+
+# Cria e declara o diretório de dados persistentes do banco
+RUN mkdir -p /app/data
+VOLUME ["/app/data"]
+
+ENV NODE_ENV=production
+ENV PORT=80
+ENV DATA_DIR=/app/data
+
+# Expõe a porta 80 do container
 EXPOSE 80
 
-# Inicia o servidor Nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Inicia o servidor com o banco persistente
+CMD ["node", "server/index.js"]

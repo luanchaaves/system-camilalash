@@ -29,3 +29,6 @@ dist-ssr
 
 # Vitest
 coverage
+
+# Persistent database storage on host
+data/

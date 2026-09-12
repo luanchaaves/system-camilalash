@@ -10,5 +10,9 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-8181}:80"
+    volumes:
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
+      - PORT=80
+      - DATA_DIR=/app/data

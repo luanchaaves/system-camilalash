@@ -1,6 +1,7 @@
 // ========================================================================
 // SISTEMA DE GESTÃO — CAMILA RODRIGUES BEAUTY STUDIO
-// Local Persistence Engine: src/lib/storageAdapter.ts
+// Hybrid Persistence Engine: src/lib/storageAdapter.ts
+// Sincronização em tempo real com Banco de Dados Persistente no Servidor
 // ========================================================================
 
 import {
@@ -19,10 +20,7 @@ import {
   initialGoogleCalendarConnection,
 } from './mockSeedData';
 
-const CURRENT_DB_VERSION = 'camilalash_db_clean_v1';
-
 const STORAGE_KEYS = {
-  VERSION: 'camilalash_db_version',
   PROFILE: 'camilalash_profile',
   SETTINGS: 'camilalash_settings',
   CATEGORIES: 'camilalash_service_categories',
@@ -39,6 +37,22 @@ const STORAGE_KEYS = {
   AUTH_SESSION: 'camilalash_auth_session',
 };
 
+const KEY_TO_SERVER_MAP: Record<string, string> = {
+  [STORAGE_KEYS.PROFILE]: 'profile',
+  [STORAGE_KEYS.SETTINGS]: 'settings',
+  [STORAGE_KEYS.CATEGORIES]: 'categories',
+  [STORAGE_KEYS.SERVICES]: 'services',
+  [STORAGE_KEYS.PAYMENT_METHODS]: 'paymentMethods',
+  [STORAGE_KEYS.EXPENSE_CATEGORIES]: 'expenseCategories',
+  [STORAGE_KEYS.CLIENTS]: 'clients',
+  [STORAGE_KEYS.APPOINTMENTS]: 'appointments',
+  [STORAGE_KEYS.ENTRIES]: 'entries',
+  [STORAGE_KEYS.EXPENSES]: 'expenses',
+  [STORAGE_KEYS.NOTIFICATIONS]: 'notifications',
+  [STORAGE_KEYS.AUDIT_LOGS]: 'auditLogs',
+  [STORAGE_KEYS.GOOGLE_CALENDAR]: 'googleCalendar',
+};
+
 class StorageAdapter {
   private isInitialized = false;
 
@@ -49,61 +63,47 @@ class StorageAdapter {
   public init() {
     if (this.isInitialized || typeof window === 'undefined') return;
 
-    const storedVersion = localStorage.getItem(STORAGE_KEYS.VERSION);
-
-    // Migração para banco limpo de produção
-    if (storedVersion !== CURRENT_DB_VERSION) {
-      localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(initialClients));
-      localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(initialAppointments));
-      localStorage.setItem(STORAGE_KEYS.ENTRIES, JSON.stringify(initialFinancialEntries));
-      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(initialFinancialExpenses));
-      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(initialNotifications));
-      localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(initialAuditLogs));
-      localStorage.setItem(STORAGE_KEYS.GOOGLE_CALENDAR, JSON.stringify(initialGoogleCalendarConnection));
-      localStorage.setItem(STORAGE_KEYS.VERSION, CURRENT_DB_VERSION);
-    }
-
     if (!localStorage.getItem(STORAGE_KEYS.PROFILE)) {
-      this.setItem(STORAGE_KEYS.PROFILE, initialProfile);
+      this.setItemLocal(STORAGE_KEYS.PROFILE, initialProfile);
     }
     if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
-      this.setItem(STORAGE_KEYS.SETTINGS, initialStudioSettings);
+      this.setItemLocal(STORAGE_KEYS.SETTINGS, initialStudioSettings);
     }
     if (!localStorage.getItem(STORAGE_KEYS.CATEGORIES)) {
-      this.setItem(STORAGE_KEYS.CATEGORIES, initialServiceCategories);
+      this.setItemLocal(STORAGE_KEYS.CATEGORIES, initialServiceCategories);
     }
     if (!localStorage.getItem(STORAGE_KEYS.SERVICES)) {
-      this.setItem(STORAGE_KEYS.SERVICES, initialServices);
+      this.setItemLocal(STORAGE_KEYS.SERVICES, initialServices);
     }
     if (!localStorage.getItem(STORAGE_KEYS.PAYMENT_METHODS)) {
-      this.setItem(STORAGE_KEYS.PAYMENT_METHODS, initialPaymentMethods);
+      this.setItemLocal(STORAGE_KEYS.PAYMENT_METHODS, initialPaymentMethods);
     }
     if (!localStorage.getItem(STORAGE_KEYS.EXPENSE_CATEGORIES)) {
-      this.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, initialExpenseCategories);
+      this.setItemLocal(STORAGE_KEYS.EXPENSE_CATEGORIES, initialExpenseCategories);
     }
     if (!localStorage.getItem(STORAGE_KEYS.CLIENTS)) {
-      this.setItem(STORAGE_KEYS.CLIENTS, initialClients);
+      this.setItemLocal(STORAGE_KEYS.CLIENTS, initialClients);
     }
     if (!localStorage.getItem(STORAGE_KEYS.APPOINTMENTS)) {
-      this.setItem(STORAGE_KEYS.APPOINTMENTS, initialAppointments);
+      this.setItemLocal(STORAGE_KEYS.APPOINTMENTS, initialAppointments);
     }
     if (!localStorage.getItem(STORAGE_KEYS.ENTRIES)) {
-      this.setItem(STORAGE_KEYS.ENTRIES, initialFinancialEntries);
+      this.setItemLocal(STORAGE_KEYS.ENTRIES, initialFinancialEntries);
     }
     if (!localStorage.getItem(STORAGE_KEYS.EXPENSES)) {
-      this.setItem(STORAGE_KEYS.EXPENSES, initialFinancialExpenses);
+      this.setItemLocal(STORAGE_KEYS.EXPENSES, initialFinancialExpenses);
     }
     if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS)) {
-      this.setItem(STORAGE_KEYS.NOTIFICATIONS, initialNotifications);
+      this.setItemLocal(STORAGE_KEYS.NOTIFICATIONS, initialNotifications);
     }
     if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
-      this.setItem(STORAGE_KEYS.AUDIT_LOGS, initialAuditLogs);
+      this.setItemLocal(STORAGE_KEYS.AUDIT_LOGS, initialAuditLogs);
     }
     if (!localStorage.getItem(STORAGE_KEYS.GOOGLE_CALENDAR)) {
-      this.setItem(STORAGE_KEYS.GOOGLE_CALENDAR, initialGoogleCalendarConnection);
+      this.setItemLocal(STORAGE_KEYS.GOOGLE_CALENDAR, initialGoogleCalendarConnection);
     }
     if (!localStorage.getItem(STORAGE_KEYS.AUTH_SESSION)) {
-      this.setItem(STORAGE_KEYS.AUTH_SESSION, {
+      this.setItemLocal(STORAGE_KEYS.AUTH_SESSION, {
         user: initialProfile,
         token: 'mock_jwt_session_camila',
         isAuthenticated: true,
@@ -111,6 +111,47 @@ class StorageAdapter {
     }
 
     this.isInitialized = true;
+    this.syncWithServer();
+  }
+
+  // Sincronização com o Banco Persistente no Servidor Proxmox
+  public async syncWithServer() {
+    try {
+      const response = await fetch('/api/db', {
+        headers: { 'Accept': 'application/json' },
+      });
+
+      if (!response.ok) return;
+
+      const serverDb = await response.json();
+      if (!serverDb || typeof serverDb !== 'object') return;
+
+      if (serverDb.profile) this.setItemLocal(STORAGE_KEYS.PROFILE, serverDb.profile);
+      if (serverDb.settings) this.setItemLocal(STORAGE_KEYS.SETTINGS, serverDb.settings);
+      if (serverDb.categories) this.setItemLocal(STORAGE_KEYS.CATEGORIES, serverDb.categories);
+      if (serverDb.services) this.setItemLocal(STORAGE_KEYS.SERVICES, serverDb.services);
+      if (serverDb.paymentMethods) this.setItemLocal(STORAGE_KEYS.PAYMENT_METHODS, serverDb.paymentMethods);
+      if (serverDb.expenseCategories) this.setItemLocal(STORAGE_KEYS.EXPENSE_CATEGORIES, serverDb.expenseCategories);
+      if (serverDb.clients) this.setItemLocal(STORAGE_KEYS.CLIENTS, serverDb.clients);
+      if (serverDb.appointments) this.setItemLocal(STORAGE_KEYS.APPOINTMENTS, serverDb.appointments);
+      if (serverDb.entries) this.setItemLocal(STORAGE_KEYS.ENTRIES, serverDb.entries);
+      if (serverDb.expenses) this.setItemLocal(STORAGE_KEYS.EXPENSES, serverDb.expenses);
+      if (serverDb.notifications) this.setItemLocal(STORAGE_KEYS.NOTIFICATIONS, serverDb.notifications);
+      if (serverDb.auditLogs) this.setItemLocal(STORAGE_KEYS.AUDIT_LOGS, serverDb.auditLogs);
+      if (serverDb.googleCalendar) this.setItemLocal(STORAGE_KEYS.GOOGLE_CALENDAR, serverDb.googleCalendar);
+
+      window.dispatchEvent(new CustomEvent('camilalash_storage_update', { detail: { sync: 'server' } }));
+    } catch {
+      // Caso a API não esteja acessível (ex: preview sem backend), segue local sem erros
+    }
+  }
+
+  private setItemLocal<T>(key: string, value: T): void {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.error('Erro ao salvar localmente:', e);
+    }
   }
 
   public getItem<T>(key: string, defaultValue: T): T {
@@ -124,11 +165,19 @@ class StorageAdapter {
   }
 
   public setItem<T>(key: string, value: T): void {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      window.dispatchEvent(new CustomEvent('camilalash_storage_update', { detail: { key } }));
-    } catch (e) {
-      console.error('Erro ao salvar no storage:', e);
+    this.setItemLocal(key, value);
+    window.dispatchEvent(new CustomEvent('camilalash_storage_update', { detail: { key } }));
+
+    // Persistência assíncrona automática no servidor Proxmox
+    const serverKey = KEY_TO_SERVER_MAP[key];
+    if (serverKey) {
+      fetch('/api/db/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [serverKey]: value }),
+      }).catch(err => {
+        console.warn('[STORAGE] Falha ao sincronizar com backend no servidor:', err);
+      });
     }
   }
 
